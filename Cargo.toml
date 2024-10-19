@@ -1,0 +1,11 @@
+[package]
+name = "utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.utils-derive]
+path = "derive"
+optional = true
+
+[features]
+derive = ["utils-derive"]
