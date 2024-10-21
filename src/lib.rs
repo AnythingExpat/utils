@@ -7,44 +7,71 @@ extern crate self as utils;
 pub use utils_derive::*;
 
 #[derive(fmt::Debug)]
-pub enum EnvError {
+pub enum EnvErrorType {
     NotPresent,
     NotUnicode(OsString),
     InvalidFormat,
     Other(String)
 }
 
-impl From<std::env::VarError> for EnvError {
+#[derive(fmt::Debug)]
+pub struct EnvError {
+    pub var: String,
+    pub ty: EnvErrorType
+}
+
+impl From<std::env::VarError> for EnvErrorType {
     fn from(value: std::env::VarError) -> Self {
         match value {
-            std::env::VarError::NotPresent => EnvError::NotPresent,
-            std::env::VarError::NotUnicode(str) => EnvError::NotUnicode(str)
+            std::env::VarError::NotPresent => EnvErrorType::NotPresent,
+            std::env::VarError::NotUnicode(str) => EnvErrorType::NotUnicode(str)
         }
     }
 }
 
+impl fmt::Display for EnvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error parsing environment variable '{}': ", self.var)?;
+        match &self.ty {
+            EnvErrorType::NotPresent => write!(f, "Not present"),
+            EnvErrorType::NotUnicode(_) => write!(f, "Not valid unicode"),
+            EnvErrorType::InvalidFormat => write!(f, "Unable to parse"),
+            EnvErrorType::Other(err) => write!(f, "{}", err)
+        }
+    }
+}
+
+impl EnvError {
+    fn convert<T, Err: Into<EnvErrorType>>(res: Result<T, Err>, ident: &str) -> Result<T, EnvError> {
+        res.map_err(|err| EnvError { var: String::from(ident), ty: err.into() })
+    }
+}
+
 pub trait FromEnv where Self: Sized {
-    fn from_env(value: &str) -> Result<Self, EnvError>;
+    fn from_env(value: &str) -> Result<Self, EnvErrorType>;
     fn load(ident: &str) -> Result<Self, EnvError> {
-        Self::from_env(&std::env::var(ident)?)
+        EnvError::convert(Self::from_env(&EnvError::convert(std::env::var(ident), ident)?), ident)
     }
 
     fn load_or_file(ident: &str) -> Result<Self, EnvError> {
         let str = match std::env::var(ident) {
             Ok(value) => value,
-            Err(std::env::VarError::NotPresent) => std::fs::read_to_string(std::env::var(format!("{}_FILE", ident))?).map_err(|err| EnvError::Other(err.to_string()))?,
-            Err(err) => { return Err(err.into()); }
+            Err(std::env::VarError::NotPresent) => {
+                let name = format!("{}_FILE", ident);
+                std::fs::read_to_string(EnvError::convert(std::env::var(&name), &name)?).map_err(|err| EnvError { var: name, ty: EnvErrorType::Other(err.to_string()) })?
+            },
+            Err(err) => { return Err(EnvError { var: String::from(ident), ty: err.into() }); }
         };
 
-        Self::from_env(&str)
+        EnvError::convert(Self::from_env(&str), ident)
     }
 }
 
 macro_rules! impl_from_env {
     ($($t:ty),*) => {
         $(impl FromEnv for $t {
-            fn from_env(value: &str) -> Result<Self, EnvError> {
-                value.parse().map_err(|_| EnvError::InvalidFormat)
+            fn from_env(value: &str) -> Result<Self, EnvErrorType> {
+                value.parse().map_err(|_| EnvErrorType::InvalidFormat)
             }
         })*
     };
@@ -54,15 +81,15 @@ impl_from_env!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
 impl_from_env!(f32, f64, bool, String);
 
 impl<T> FromEnv for Option<T> where T: FromEnv {
-    fn from_env(value: &str) -> Result<Self, EnvError> {
+    fn from_env(value: &str) -> Result<Self, EnvErrorType> {
         Ok(Some(T::from_env(value)?))
     }
 
     fn load(ident: &str) -> Result<Self, EnvError> {
         match std::env::var(ident) {
-            Ok(value) => Ok(FromEnv::from_env(&value)?),
+            Ok(value) => EnvError::convert(FromEnv::from_env(&value), ident),
             Err(std::env::VarError::NotPresent) => Ok(None),
-            Err(err) => Err(err.into())
+            Err(err) => Err(EnvError { var: String::from(ident), ty: err.into() })
         }
     }
 
@@ -70,21 +97,21 @@ impl<T> FromEnv for Option<T> where T: FromEnv {
         let str = match std::env::var(ident) {
             Ok(value) => value,
             Err(std::env::VarError::NotPresent) => match std::env::var(format!("{}_FILE", ident)) {
-                Ok(path) => std::fs::read_to_string(path).map_err(|err| EnvError::Other(err.to_string()))?,
+                Ok(path) => std::fs::read_to_string(path).map_err(|err| EnvError { var: String::from(ident), ty: EnvErrorType::Other(err.to_string()) })?,
                 Err(std::env::VarError::NotPresent) => { return Ok(None); },
-                Err(err) => { return Err(err.into()); }
+                Err(err) => { return Err(EnvError { var: String::from(ident), ty: err.into() }); }
             },
-            Err(err) => { return Err(err.into()); }
+            Err(err) => { return Err(EnvError { var: String::from(ident), ty: err.into() }); }
         };
 
-        FromEnv::from_env(&str)
+        EnvError::convert(FromEnv::from_env(&str), ident)
     }
 }
 
 pub struct Masked<T>(pub T);
 
 impl<T> FromEnv for Masked<T> where T: FromEnv {
-    fn from_env(value: &str) -> Result<Self, EnvError> {
+    fn from_env(value: &str) -> Result<Self, EnvErrorType> {
         T::from_env(value).map(|val| Masked(val))
     }
 }

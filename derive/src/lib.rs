@@ -100,8 +100,8 @@ pub fn derive_env_config(input: TokenStream) -> TokenStream {
     
     quote! {
         impl utils::FromEnv for #s {
-            fn from_env(value: &str) -> Result<Self, utils::EnvError> {
-                Err(utils::EnvError::Other(String::from("'from' method not implemented for derive(FromEnv)")))
+            fn from_env(value: &str) -> Result<Self, utils::EnvErrorType> {
+                Err(utils::EnvErrorType::Other(String::from("'from' method not implemented for derive(FromEnv)")))
             }
 
             fn load(ident: &str) -> Result<Self, utils::EnvError> {
