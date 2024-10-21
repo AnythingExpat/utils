@@ -41,6 +41,8 @@ impl fmt::Display for EnvError {
     }
 }
 
+impl std::error::Error for EnvError {}
+
 impl EnvError {
     fn convert<T, Err: Into<EnvErrorType>>(res: Result<T, Err>, ident: &str) -> Result<T, EnvError> {
         res.map_err(|err| EnvError { var: String::from(ident), ty: err.into() })
