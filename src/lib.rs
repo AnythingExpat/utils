@@ -154,8 +154,6 @@ pub fn __join_idents(ident: &str, postfix: &str) -> String {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     #[cfg(feature = "derive")]
     #[derive(FromEnv, Debug)]
     struct NestedConfig {
